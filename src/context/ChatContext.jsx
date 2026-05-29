@@ -1,4 +1,4 @@
-import  { createContext, useContext, useState, useCallback } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 
 const ChatContext = createContext();
 
@@ -14,9 +14,17 @@ const featureWelcomeTexts = {
 
 export function ChatProvider({ children }) {
   const [currentView, setCurrentView] = useState('Legal Rights Awareness');
-  const [backendStatus, setBackendStatus] = useState('offline'); // Set to offline for UI-only presentation mode
-  const [isRecording, setIsRecording] = useState(false);
+  const [backendStatus, setBackendStatus] = useState('offline'); 
   const [input, setInput] = useState('');
+  
+  // Real voice tracking & multilingual target configuration states
+  const [isRecording, setIsRecording] = useState(false);
+  const [speechLanguage, setSpeechLanguage] = useState('en-IN'); 
+
+  const BACKEND_URL = 'http://localhost:5000'; 
+  
+  // Hardware stream reference tracking to safely halt recording devices
+  const recognitionRef = useRef(null);
 
   // Auto-generate isolated chat bubbles state history map per module
   const [chatHistories, setChatHistories] = useState(
@@ -26,90 +34,207 @@ export function ChatProvider({ children }) {
     }, {})
   );
 
-  // Health check handler simulation
+  // Live health check handler mapping to Node.js backend server status
   const checkBackendHealth = useCallback(async () => {
-    // Stays offline since this is a frontend-driven high-fidelity demo session
-    setBackendStatus('offline');
+    try {
+      const response = await fetch(`${BACKEND_URL}/`, { method: 'GET' });
+      return response.ok;
+    } catch (err) {
+      console.error('Backend health check network failure:', err);
+      return false;
+    }
   }, []);
 
+  // Asynchronous wrapper pattern eliminating ESLint setState-in-effect errors
+  useEffect(() => {
+    let isMounted = true;
+
+    const runHealthCheck = async () => {
+      const isOnline = await checkBackendHealth();
+      if (isMounted) {
+        setBackendStatus(isOnline ? 'online' : 'offline');
+      }
+    };
+
+    runHealthCheck();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [checkBackendHealth]);
+
+  // Fetches chronological conversation logs directly from MongoDB Atlas
+  const fetchModuleHistory = useCallback(async (category) => {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/ai/history/${encodeURIComponent(category)}`);
+      if (!response.ok) return;
+
+      const data = await response.json();
+      
+      // If messages array exists in the database document, map it into the UI history map
+      if (data && data.messages && data.messages.length > 0) {
+        const parsedMessages = data.messages.map(msg => ({
+          sender: msg.sender,
+          text: msg.text
+        }));
+
+        setChatHistories(prev => ({
+          ...prev,
+          [category]: [
+            { sender: 'bot', text: featureWelcomeTexts[category] }, // Keep standard top greeting context
+            ...parsedMessages
+          ]
+        }));
+      }
+    } catch (err) {
+      console.warn(`Could not sync conversation logs for ${category} from MongoDB Atlas natively:`, err);
+    }
+  }, []);
+
+  // FIXED: Wrapped inside an isolated function scope to satisfy the eslint(react-hooks/set-state-in-effect) rule
+  useEffect(() => {
+    const syncHistory = async () => {
+      if (backendStatus === 'online') {
+        await fetchModuleHistory(currentView);
+      }
+    };
+
+    syncHistory();
+  }, [currentView, backendStatus, fetchModuleHistory]);
+
+  // Sends the user input payload directly to the live API backend route
   const sendMessage = async (textToSubmit) => {
     if (!textToSubmit.trim()) return;
 
     const activeCategory = currentView;
     const updatedUserLogs = [...chatHistories[activeCategory], { sender: 'user', text: textToSubmit }];
     
-    // 1. Immediately append user's text input to the active chat log
     setChatHistories(prev => ({ ...prev, [activeCategory]: updatedUserLogs }));
     setInput('');
 
-    // 2. Append animated placeholder typing indicator block 
+    // Append animated placeholder typing indicator block for UI feedback
     setChatHistories(prev => ({
       ...prev,
       [activeCategory]: [...updatedUserLogs, { sender: 'bot', text: '...', isTyping: true }]
     }));
 
-    // 3. High-Fidelity Interactive Demo Fallback Simulation (Simulating AI response times)
-    setTimeout(() => {
-      let simulatedReply = `I have logged your inquiry regarding "${textToSubmit}". Under standard legal provisions, this requires official verification.`;
-      
-      if (activeCategory === 'Legal Rights Awareness') {
-        simulatedReply = `Under the Indian Constitution, your query regarding "${textToSubmit}" falls under fundamental protections. Every citizen is guaranteed equality before the law and statutory remedy under constitutional guidelines.`;
-      } else if (activeCategory === 'Complaint Filing Guidance') {
-        simulatedReply = `To proceed with your request: "${textToSubmit}", you should approach your local jurisdictional police station. If they refuse to lodge an official FIR, you can escalate the grievance directly to the Superintendent of Police under Section 154(3) of the CrPC.`;
-      } else if (activeCategory === 'Cybercrime Reporting Support') {
-        simulatedReply = `Immediate Safety Protocol: For financial or identity incidents like "${textToSubmit}", register an official complaint instantly at the National Cyber Crime Reporting Portal (www.cybercrime.gov.in) or call the central helpline at 1930.`;
-      } else if (activeCategory === 'Consumer Protection Guidance') {
-        simulatedReply = `Regarding "${textToSubmit}": Under the Consumer Protection Act, consumers can directly file a dispute against defective goods or deficient services before the District Consumer Disputes Redressal Commission without complex litigation steps.`;
-      } else if (activeCategory === 'Domestic Violence Reporting Support') {
-        simulatedReply = `Your privacy and security are paramount. For issues relating to "${textToSubmit}", immediate legal protection or residence orders can be invoked under the Protection of Women from Domestic Violence Act. Emergency legal aid support lines are reachable at 181 or 1091.`;
-      } else if (activeCategory === 'Legal Documentation Guidance') {
-        simulatedReply = `A standard legal draft for "${textToSubmit}" should outline precise terms, executed on non-judicial stamp paper of appropriate value. This must be attested by an authorized notary public or registered official to be legally binding.`;
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/ai/generate-analysis`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          prompt: textToSubmit, 
+          category: activeCategory
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to get backend server response');
       }
 
-      // 4. Inject the smart simulated reply into the UI history layout and wipe typing indicator
       setChatHistories(prev => ({
         ...prev,
         [activeCategory]: prev[activeCategory].filter(m => !m.isTyping).concat({
           sender: 'bot',
-          text: simulatedReply
+          text: data.text 
         })
       }));
-    }, 1000); // 1-second simulated AI thinking delay
+
+    } catch (err) {
+      console.error('Frontend Fetch Error:', err);
+      setChatHistories(prev => ({
+        ...prev,
+        [activeCategory]: prev[activeCategory].filter(m => !m.isTyping).concat({
+          sender: 'bot',
+          text: 'Connection error. Unable to connect to JurisAI core server routes. Please ensure your backend server is running on port 5000.'
+        })
+      }));
+    }
   };
 
-  const simulateVoiceInput = () => {
-    if (isRecording) {
+  // Safe Speech-to-Text handler opening and closing hardware device streams cleanly
+  const toggleSpeechInput = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    
+    if (!SpeechRecognition) {
+      alert("Speech recognition is not supported in this browser. Please use Google Chrome.");
+      return;
+    }
+
+    if (isRecording && recognitionRef.current) {
+      recognitionRef.current.stop();
       setIsRecording(false);
       return;
     }
-    setIsRecording(true);
-    
-    // Simulates Speech-to-Text translation capture delay
-    setTimeout(() => {
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = speechLanguage; 
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
+    recognition.onstart = () => {
+      setIsRecording(true);
+    };
+
+    recognition.onend = () => {
       setIsRecording(false);
-      let simulatedQuery = "What primary legal steps should I initiate here?";
-      if (currentView.includes("Cybercrime")) simulatedQuery = "My online banking transaction was compromised, how do I report it?";
-      if (currentView.includes("Consumer")) simulatedQuery = "A merchant sold me a fake product and refuses to offer a refund.";
+    };
+
+    recognition.onerror = (event) => {
+      console.error("Speech Recognition Error:", event.error);
+      setIsRecording(false);
+    };
+
+    recognition.onresult = (event) => {
+      const spokenTranscript = event.results[0][0].transcript;
+      setInput(prev => prev ? `${prev} ${spokenTranscript}` : spokenTranscript);
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+  };
+
+  // High-Fidelity Multilingual Text-to-Speech Engine
+  const speakResponseAloud = (textToSpeak) => {
+    if ('speechSynthesis' in window) {
+      // Immediately terminate any active audio overlays or queues
+      window.speechSynthesis.cancel();
+
+      // Clean up markdown formatting characters before sending text to speech synthesizers
+      const cleanText = textToSpeak.replace(/[*#_`~-]/g, '');
+
+      const utterance = new SpeechSynthesisUtterance(cleanText);
       
-      setInput(simulatedQuery);
-    }, 2000);
+      // Sync speaking accent parameters instantly to the selected configuration dropdown
+      utterance.lang = speechLanguage; 
+      utterance.rate = 0.95; // Custom pacing optimized for clear legal explanations
+
+      window.speechSynthesis.speak(utterance);
+    } else {
+      console.warn("Web Speech Synthesis API is not supported in this client environment.");
+    }
   };
 
   return (
     <ChatContext.Provider value={{
       currentView, setCurrentView,
       backendStatus, checkBackendHealth,
-      isRecording, simulateVoiceInput,
+      isRecording, toggleSpeechInput, 
+      speechLanguage, setSpeechLanguage, 
       input, setInput,
       messages: chatHistories[currentView] || [],
-      sendMessage
+      sendMessage,
+      speakResponseAloud 
     }}>
       {children}
     </ChatContext.Provider>
   );
 }
 
-// Custom hook helper declared cleanly
 const useChat = () => {
   const context = useContext(ChatContext);
   if (!context) {
@@ -118,6 +243,5 @@ const useChat = () => {
   return context;
 };
 
-// Export structure that satisfies Vite's strict fast refresh boundary checks
 // eslint-disable-next-line react-refresh/only-export-components
 export { useChat };
