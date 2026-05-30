@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useChat } from '../context/ChatContext';
-import ReactMarkdown from 'react-markdown'; // 👈 NEW DEPENDENCY IMPORT
+import ReactMarkdown from 'react-markdown'; 
 import { 
   FaBalanceScale, FaShieldAlt, FaUserShield, FaGavel, 
   FaFileContract, FaLanguage, FaMicrophone, FaPaperPlane, 
@@ -9,6 +9,10 @@ import {
   FaVolumeUp 
 } from 'react-icons/fa';
 import { MdGavel } from 'react-icons/md';
+
+// 1. UPDATED: Import tools needed to terminate the database session securely
+import { signOut } from 'firebase/auth';
+import { auth } from '../firebase'; // Verify this path matches your folder layout
 
 export default function Dashboard({ setIsAuthenticated }) {
   const navigate = useNavigate();
@@ -48,10 +52,16 @@ export default function Dashboard({ setIsAuthenticated }) {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleLogout = () => {
-    setIsAuthenticated(false);
-    navigate('/');
-  };
+  // 2. UPDATED: Added real-time asynchronous logout pipeline connection 
+    const handleLogout = async () => {
+      try {
+        await signOut(auth); // Terminate token
+        setIsAuthenticated(false); // Update App.jsx
+        navigate('/Login'); // Redirect safely
+      } catch (error) {
+        console.error(error);
+      }
+    };
 
   const handleFormSubmit = (e) => {
     e.preventDefault();
@@ -59,7 +69,7 @@ export default function Dashboard({ setIsAuthenticated }) {
   };
 
   return (
-    <div className="h-screen w-screen flex bg-jurisCream overflow-hidden font-sans text-slate-800 select-none">
+    <div className="h-screen w-screen flex bg-[#f4f1ea] overflow-hidden font-sans text-slate-800 select-none">
       
       {/* 1. DESKTOP PERMANENT NAVIGATION SIDEBAR */}
       <aside className="hidden md:flex md:w-72 bg-[#0d233a] flex-col text-slate-200 border-r border-slate-800/10 shrink-0">
@@ -173,9 +183,6 @@ export default function Dashboard({ setIsAuthenticated }) {
                         </div>
                       ) : (
                         <div className="flex flex-col gap-2">
-                          {/* UPDATED: Applied dynamic processing tree routing based on identity logs. 
-                            Users render raw inputs cleanly, OpenAI response streams render native block markdown markup structure.
-                          */}
                           {isUser ? (
                             <p className="whitespace-pre-wrap">{msg.text}</p>
                           ) : (
@@ -184,7 +191,7 @@ export default function Dashboard({ setIsAuthenticated }) {
                             </div>
                           )}
                           
-                          {/* SPEAKER ICON NODE: Accessible on all system bot responses */}
+                          {/* SPEAKER ICON NODE */}
                           {!isUser && (
                             <button
                               type="button"

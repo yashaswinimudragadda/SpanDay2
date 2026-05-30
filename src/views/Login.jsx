@@ -1,11 +1,14 @@
-import  { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState } from 'react';
+import { useNavigate, Link } from 'react-router-dom'; 
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { FaBalanceScale, FaUserLock, FaEye, FaEyeSlash } from 'react-icons/fa';
 
-// 1. Explicit Validation Schema - This block handles all input checks rules strictly
+// Import your live configuration tools
+import { auth } from '../firebase'; 
+import { signInWithEmailAndPassword } from 'firebase/auth';
+
 const loginSchema = z.object({
   email: z
     .string()
@@ -22,42 +25,44 @@ export default function Login({ setIsAuthenticated }) {
   const [showPassword, setShowPassword] = useState(false);
   const [authError, setAuthError] = useState('');
 
-  // 2. Destructure properties from React Hook Form, plugging in our Zod validation engine
   const { 
     register, 
     handleSubmit, 
     formState: { errors, isSubmitting } 
   } = useForm({
     resolver: zodResolver(loginSchema),
-    mode: 'onTouched' // Checks input fields instantly when a user leaves the field
+    mode: 'onTouched'
   });
 
-  // 3. This triggers ONLY if Zod confirms all input values pass the schema checks
   const onSubmit = async (data) => {
     setAuthError('');
     
-    // Simulating API verification delay
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-
-    if (data.email === 'developer@indiaspan.com' && data.password === 'admin123') {
-      setIsAuthenticated(true);
-      navigate('/dashboard');
-    } else {
-      setAuthError('Authentication failed. Invalid email or password.');
+    try {
+      await signInWithEmailAndPassword(auth, data.email, data.password);
+      if (typeof setIsAuthenticated === 'function') {
+        setIsAuthenticated(true);
+      }
+      navigate('/Dashboard');
+    } catch (error) {
+      if (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+        setAuthError('Authentication failed. Invalid email or password.');
+      } else if (error.code === 'auth/too-many-requests') {
+        setAuthError('Access temporarily blocked due to too many failed attempts. Try again later.');
+      } else {
+        setAuthError('Unable to securely reach authentication server. Check network.');
+      }
     }
   };
 
   return (
-    <div className="min-h-screen bg-jurisCream flex flex-col justify-center items-center px-4 relative overflow-hidden font-sans text-slate-800">
+    <div className="min-h-screen bg-[#f4f1ea] flex flex-col justify-center items-center px-4 relative overflow-hidden font-sans text-slate-800">
+      {/* Background Decorative Ambient Blurs */}
+      <div className="absolute top-[-10%] right-[-10%] w-72 h-72 sm:w-96 sm:h-96 rounded-full bg-[#0d233a]/5 blur-[80px] sm:blur-[120px] pointer-events-none" />
+      <div className="absolute bottom-[-10%] left-[-10%] w-72 h-72 sm:w-96 sm:h-96 rounded-full bg-[#00a896]/10 blur-[80px] sm:blur-[120px] pointer-events-none" />
       
-      {/* Background soft blur accents */}
-      <div className="absolute top-[-10%] right-[-10%] w-125 h-125 rounded-full bg-[#0d233a]/5 blur-[120px] pointer-events-none" />
-      <div className="absolute bottom-[-10%] left-[-10%] w-125 h-125 rounded-full bg-[#00a896]/10 blur-[120px] pointer-events-none" />
-      
-      {/* Central Login Card Container Container */}
-      <div className="bg-jurisMilk p-8 rounded-2xl shadow-xl border border-slate-200/60 w-full max-w-md z-10">
+      {/* Container Card */}
+      <div className="bg-[#ffffff] p-6 sm:p-8 rounded-2xl shadow-xl border border-slate-200/60 w-full max-w-md z-10 dynamic-card">
         
-        {/* Branding Header */}
         <div className="text-center mb-8">
           <div className="inline-flex justify-center items-center w-14 h-14 rounded-2xl bg-slate-50 border border-slate-200 text-[#00a896] text-3xl mb-4 shadow-sm">
             <FaBalanceScale />
@@ -66,24 +71,20 @@ export default function Login({ setIsAuthenticated }) {
           <p className="text-slate-500 text-xs mt-1.5 uppercase tracking-widest font-semibold">Legal Assistant Portal</p>
         </div>
 
-        {/* Global Server/Auth Error Display */}
         {authError && (
           <div className="mb-5 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-600 text-xs text-center font-semibold">
             {authError}
           </div>
         )}
         
-        {/* Form elements mapped to React Hook Form handler */}
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-          
-          {/* Email Input Field Block */}
           <div>
             <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
               Email Address
             </label>
             <input 
               type="text" 
-              {...register('email')} // Connects validation rules to this input field
+              {...register('email')}
               placeholder="developer@indiaspan.com"
               className={`w-full bg-slate-50/50 border rounded-xl px-4 py-3 text-[#0d233a] text-sm placeholder-slate-400 focus:bg-white focus:outline-none transition-all ${
                 errors.email 
@@ -91,13 +92,11 @@ export default function Login({ setIsAuthenticated }) {
                   : 'border-slate-200 focus:border-[#00a896] focus:ring-1 focus:ring-[#00a896]/30'
               }`}
             />
-            {/* Checked value warning response text */}
             {errors.email && (
               <p className="text-rose-600 text-xs mt-1.5 pl-1 font-medium">{errors.email.message}</p>
             )}
           </div>
 
-          {/* Password Input Field Block */}
           <div>
             <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
               Access Password
@@ -105,7 +104,7 @@ export default function Login({ setIsAuthenticated }) {
             <div className="relative">
               <input 
                 type={showPassword ? 'text' : 'password'} 
-                {...register('password')} // Connects validation rules to this input field
+                {...register('password')}
                 placeholder="••••••••"
                 className={`w-full bg-slate-50/50 border rounded-xl pl-4 pr-12 py-3 text-[#0d233a] text-sm placeholder-slate-400 focus:bg-white focus:outline-none transition-all ${
                   errors.password 
@@ -121,13 +120,11 @@ export default function Login({ setIsAuthenticated }) {
                 {showPassword ? <FaEyeSlash /> : <FaEye />}
               </button>
             </div>
-            {/* Checked value warning response text */}
             {errors.password && (
               <p className="text-rose-600 text-xs mt-1.5 pl-1 font-medium">{errors.password.message}</p>
             )}
           </div>
           
-          {/* Submit Action Block */}
           <button 
             type="submit"
             disabled={isSubmitting}
@@ -142,6 +139,13 @@ export default function Login({ setIsAuthenticated }) {
             )}
           </button>
         </form>
+
+        <div className="mt-5 text-center text-xs text-slate-500">
+          Need an account?{' '}
+          <Link to="/Signup" className="text-[#00a896] font-semibold hover:underline">
+            Sign Up
+          </Link>
+        </div>
 
         <div className="mt-8 pt-5 border-t border-slate-200 text-center text-[11px] text-slate-400 tracking-wide font-medium">
           IndiaSpan Company Training Project Module
